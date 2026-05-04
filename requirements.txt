@@ -1,0 +1,63 @@
+# ══════════════════════════════════════════════
+# betmaster-api/requirements.txt
+# ══════════════════════════════════════════════
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+httpx==0.27.2
+redis==5.2.0
+stripe==11.2.0
+pydantic==2.9.2
+python-dotenv==1.0.1
+
+
+---
+# ══════════════════════════════════════════════
+# betmaster-api/.env.example
+# (copie para .env e preencha os valores)
+# ══════════════════════════════════════════════
+
+# API-Football (api-sports.io) — plano Basic US$15/mês
+API_FOOTBALL_KEY=sua_chave_aqui
+
+# Redis — Railway provisiona automaticamente, ou use Upstash (grátis)
+REDIS_URL=redis://localhost:6379
+
+# Stripe
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+VITE_STRIPE_PAYMENT_LINK=https://buy.stripe.com/seu_link
+
+# Backend
+ADMIN_KEY=troca_isso_por_algo_secreto
+ENV=production
+FRONTEND_ORIGIN=https://betmaster.vercel.app
+
+
+---
+# ══════════════════════════════════════════════
+# betmaster-api/Procfile  (Heroku / Railway)
+# ══════════════════════════════════════════════
+web: uvicorn main:app --host 0.0.0.0 --port $PORT
+
+
+---
+# ══════════════════════════════════════════════
+# betmaster-api/railway.toml
+# ══════════════════════════════════════════════
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 10
+restartPolicyType = "ON_FAILURE"
+
+
+---
+# ══════════════════════════════════════════════
+# betmaster-frontend/.env.example  (Vercel)
+# ══════════════════════════════════════════════
+VITE_API_URL=https://betmaster-api.up.railway.app
+VITE_STRIPE_PAYMENT_LINK=https://buy.stripe.com/seu_link
+VITE_STRIPE_PRICE_ID=price_xxxxx
