@@ -187,29 +187,42 @@ def _parse_absences(injuries_data: list[dict], team_id: int) -> list[RawAbsence]
 async def fetch_todays_fixtures(client: httpx.AsyncClient) -> list[dict]:
     """Busca todos os jogos de hoje nas ligas monitoradas."""
     today = date.today().isoformat()
-    league_ids = ",".join(str(lid) for lid in WATCHED_LEAGUES)
-
     data = await _get(client, "/fixtures", {
         "date":     today,
         "timezone": TIMEZONE,
-        # Filtra pelas ligas de interesse direto na query
-        # (API-Football não aceita lista, então fazemos uma call por liga
-        #  OU filtramos no cliente — abaixo filtramos no cliente)
     })
     fixtures = data.get("response", [])
-    # Filtra apenas ligas monitoradas
     return [f for f in fixtures if f["league"]["id"] in WATCHED_LEAGUES]
 
 
 async def fetch_team_last10(client: httpx.AsyncClient, team_id: int, league_id: int) -> list[dict]:
-    """Últimas 10 partidas de um time em uma liga."""
+    """
+    Últimas 10 partidas de um time em uma liga.
+    Ajustado para Plano FREE (usa 'season' em vez de 'last').
+    """
+    current_year = date.today().year
+    
+    # Busca pela temporada atual
     data = await _get(client, "/fixtures", {
         "team":   team_id,
         "league": league_id,
-        "last":   10,
-        "status": "FT",         # apenas finalizadas
+        "season": current_year,
+        "status": "FT",
     })
-    return data.get("response", [])
+    
+    fixtures = data.get("response", [])
+    
+    # Se não houver jogos na temporada atual, tenta a anterior (útil para virada de ano)
+    if not fixtures:
+        data = await _get(client, "/fixtures", {
+            "team":   team_id,
+            "league": league_id,
+            "season": current_year - 1,
+            "status": "FT",
+        })
+        fixtures = data.get("response", [])
+
+    return fixtures[-10:] if fixtures else []
 
 
 async def fetch_injuries(client: httpx.AsyncClient, fixture_id: int) -> list[dict]:
@@ -252,11 +265,6 @@ async def fetch_enriched_matches() -> list[RawMatch]:
       1. Busca fixtures de hoje
       2. Para cada fixture: busca histórico dos dois times, lesões e odds
       3. Normaliza e retorna lista de RawMatch prontos pro motor Poisson
-
-    ⚠️  Respeita o rate limit da API-Football:
-        - Plano Free:  100 req/dia
-        - Plano Basic: 7.500 req/dia
-    Usamos semáforo + delays para não explodir a cota.
     """
     semaphore = asyncio.Semaphore(3)   # máx 3 chamadas paralelas
 
@@ -283,7 +291,6 @@ async def fetch_enriched_matches() -> list[RawMatch]:
         if not fixtures:
             return []
 
-        # Dispara todas as calls em paralelo (com semáforo)
         tasks = []
         for fx in fixtures:
             home_id   = fx["teams"]["home"]["id"]
@@ -299,7 +306,6 @@ async def fetch_enriched_matches() -> list[RawMatch]:
                 limited_get_odds(client, fix_id),
             ))
 
-        # Executa todas as coroutines de cada fixture
         for fx, h_coro, a_coro, inj_coro, odds_coro in tasks:
             home_hist, away_hist, injuries_raw, odds = await asyncio.gather(
                 h_coro, a_coro, inj_coro, odds_coro
@@ -309,7 +315,6 @@ async def fetch_enriched_matches() -> list[RawMatch]:
             away_id   = fx["teams"]["away"]["id"]
             league_id = fx["league"]["id"]
 
-            # Métricas dos times
             h_scored, h_conceded = _calc_averages(home_hist, home_id)
             a_scored, a_conceded = _calc_averages(away_hist, away_id)
             h_home_str, _        = _calc_strengths(home_hist, home_id)
@@ -341,7 +346,6 @@ async def fetch_enriched_matches() -> list[RawMatch]:
                 form_score=_form_score(away_form),
             )
 
-            # Status + placar ao vivo
             status_short = fx["fixture"]["status"]["short"]
             home_score   = fx["goals"]["home"]
             away_score   = fx["goals"]["away"]
